@@ -54,6 +54,28 @@ def euler_limit(x0, a, total_time, depth):
 def encoder_residuals(x, attention, ffn, norm1, norm2):
     h = residual_add(x, attention(norm1(x)))
     return residual_add(h, ffn(norm2(h)))
+
+def layer_norm(x, gamma, beta, eps=1e-5):
+    if not x or len(x) != len(gamma) or len(x) != len(beta) or eps <= 0:
+        raise ValueError("Invalid shape or epsilon")
+    mean = sum(x) / len(x)
+    variance = sum((v - mean) ** 2 for v in x) / len(x)
+    return [g * (v - mean) / (variance + eps) ** 0.5 + b
+            for v, g, b in zip(x, gamma, beta)]
+
+def layer_norm_tokens(tokens, gamma, beta, eps=1e-5):
+    return [layer_norm(row, gamma, beta, eps) for row in tokens]
+
+def dropout(x, p, training, rng):
+    if not 0 <= p < 1:
+        raise ValueError("Invalid probability")
+    if not training or p == 0:
+        return list(x)
+    return [0.0 if rng.random() < p else v / (1-p) for v in x]
+
+def encoder_with_dropout(x, attention, ffn, norm1, norm2, p, training, rng):
+    h = residual_add(x, dropout(attention(norm1(x)), p, training, rng))
+    return residual_add(h, dropout(ffn(norm2(h)), p, training, rng))
 '''
 
 
