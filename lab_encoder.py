@@ -1,5 +1,5 @@
 # %% [markdown]
-# # Transformer encoder
+# # Завершальні шари: residual-зв'язки, нормалізація та Dropout
 #
 # ## Skip connection: як навчати глибоку мережу
 #
@@ -501,8 +501,114 @@ if __name__ == "__main__":
 # А чи може padding вплинути на його attention без маски? Чому нормалізація
 # не замінює attention mask?
 #
-# Сучасні моделі можуть використовувати RMSNorm — споріднену нормалізацію
-# без віднімання середнього. У цій лабораторній реалізуємо саме LayerNorm.
+# ### 9.1. RMSNorm: керуємо масштабом без центрування
+#
+# LayerNorm віднімає середнє та ділить на стандартне відхилення.
+# RMSNorm пропускає центрування й використовує середній квадрат:
+# $$q=\frac1d\sum_{j=1}^d x_j^2,\qquad
+# y_j=\gamma_j\frac{x_j}{\sqrt{q+\epsilon}}.$$
+# RMS означає root mean square — корінь із середнього квадратів.
+# Це **не дисперсія**: $q=v+\mu^2$. Тому замінити дисперсію середнім
+# квадратом, але залишити віднімання середнього — не формула RMSNorm.
+#
+# Як і LayerNorm, у Transformer він працює по ознаках одного токена,
+# не залежить від сусідів у батчі й використовує поточний вхід у training
+# та evaluation. У нашому варіанті є навчуваний вектор gamma (спочатку 1),
+# без beta: `d_model` параметрів. Немає running-статистик.
+# Менше операцій над статистиками робить RMSNorm простішим; фактичне
+# прискорення залежить від реалізації та обладнання. Він не гарантує
+# кращого навчання за LayerNorm і не замінює residual-зв'язки чи dropout.
+#
+# **Приклад:** для `[1, 3]` маємо $q=5$, тому без урахування epsilon
+# RMSNorm дає приблизно `[0.447, 1.342]`, а LayerNorm — `[-1, 1]`.
+# Для `[7, 7]` LayerNorm до affine дає нулі; RMSNorm — приблизно `[1, 1]`.
+# Отже RMSNorm не забезпечує нульового середнього. При gamma=1 середній
+# квадрат виходу — $q/(q+\epsilon)$, а не точно 1.
+#
+# RMSNorm зберігає інформацію про спільний зсув координат: додавання сталої
+# змінює результат. Для додатного масштабування $cx$ нормалізований вихід
+# майже не змінюється, коли epsilon мале відносно $c^2q$; за ненульового
+# epsilon ця інваріантність не точна. Від'ємний масштаб також змінює знак.
+#
+# Реалізуйте `rms_norm` для непорожнього вектора та `rms_norm_tokens`
+# для матриці `(tokens, d_model)`. Вектор gamma має ту саму довжину, що й x;
+# eps має бути додатним. Інакше підніміть `ValueError`. Входи не змінюйте;
+# порожня послідовність токенів повертає `[]`.
+
+# %%
+def rms_norm(x, gamma, eps=1e-5):
+    ...
+
+
+def rms_norm_tokens(tokens, gamma, eps=1e-5):
+    ...
+
+
+def test_rms_norm():
+    result = rms_norm([1.0, 3.0], [1, 1])
+    denominator = (5 + 1e-5) ** .5
+    assert len(result) == 2
+    assert isclose(result[0], 1 / denominator)
+    assert isclose(result[1], 3 / denominator)
+    assert isclose(sum(v * v for v in result) / 2, 5 / (5 + 1e-5))
+    assert sum(result) > 0  # RMSNorm не центрує вектор
+    assert rms_norm([0.0, 0.0], [2, 3]) == [0.0, 0.0]
+    assert isclose(rms_norm([7.0], [2])[0], 14 / (49 + 1e-5) ** .5)
+    scaled = rms_norm([1.0, 3.0], [2, -3])
+    assert isclose(scaled[0], 2 * result[0])
+    assert isclose(scaled[1], -3 * result[1])
+    shifted = rms_norm([11.0, 13.0], [1, 1])
+    assert not isclose(result[0], shifted[0])
+    # При нульовому середньому q=v: без beta обидві формули збігаються.
+    centered = [-2.0, 2.0]
+    assert rms_norm(centered, [1, 1]) == layer_norm(centered, [1, 1], [0, 0])
+    for x, gamma, eps in [([], [], 1e-5), ([1], [], 1e-5), ([1], [1], 0),
+                          ([1], [1], -1)]:
+        try:
+            rms_norm(x, gamma, eps)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Перевірте форми та epsilon")
+    tokens, gamma = [[1.0, 3.0], [7.0, 7.0]], [1.0, 2.0]
+    before = [row[:] for row in tokens]
+    normalized = rms_norm_tokens(tokens, gamma)
+    assert normalized == [rms_norm(row, gamma) for row in tokens]
+    assert normalized[0] == rms_norm_tokens([tokens[0], [-100.0, 20.0]], gamma)[0]
+    assert tokens == before and gamma == [1.0, 2.0]
+    assert rms_norm_tokens([], gamma) == []
+
+
+if __name__ == "__main__":
+    test_rms_norm()
+    for x in [[1, 3], [7, 7], [-2, 2], [11, 13]]:
+        print("x:", x, "LN:", layer_norm(x, [1, 1], [0, 0]),
+              "RMS:", rms_norm(x, [1, 1]))
+    # Каркас розділу 6 приймає довільні norm-функції.
+    norm = lambda x: rms_norm(x, [1, 1])
+    zero = lambda x: [0.0, 0.0]
+    assert encoder_residuals([1.0, 3.0], zero, zero, norm, norm) == [1.0, 3.0]
+    print("✓ RMSNorm і порівняння з LayerNorm")
+
+# %% [markdown]
+# У PyTorch: `nn.RMSNorm(d_model, eps=1e-5)`. Задаємо eps явно для
+# порівняння з нашою реалізацією: значення за замовчуванням може залежати
+# від dtype. Усі експерименти з навчанням мають використовувати окремі
+# навчувані gamma для кожного norm-шару, а не одну спільну на весь encoder.
+#
+# Мовний backbone Gemma 3 використовує RMSNorm, зокрема для query/key та
+# навколо attention/FFN. Її vision encoder використовує LayerNorm. Просте
+# підставлення RMSNorm у наш каркас демонструє заміну нормалізації, але
+# не відтворює всю архітектуру Gemma 3.
+# [Опис Gemma 3 від Google](https://developers.googleblog.com/en/gemma-explained-whats-new-in-gemma-3/).
+#
+# Питання: які виходи отримає кожний метод для `[5,5]`? Чому вони
+# відрізняються? Що зміниться після додавання 100 до кожної координати?
+# Чи означає нормалізований RMS, що евклідова довжина вектора дорівнює 1?
+#
+# Джерела: [RMSNorm, Zhang і Sennrich](https://arxiv.org/abs/1910.07467),
+# [PyTorch RMSNorm](https://docs.pytorch.org/docs/stable/generated/torch.nn.RMSNorm.html).
+
 
 # %% [markdown]
 # ## 10. Dropout: випадкове вимкнення активацій
@@ -669,6 +775,7 @@ if __name__ == "__main__":
 #    training/evaluation, ролі epsilon та параметрів gamma/beta.
 # 6. Реалізацію Dropout, результати усереднення масок та формулу його backward.
 # 7. Каркас encoder із LayerNorm і Dropout; пояснення місця dropout у гілці.
+# 8. RMSNorm: реалізацію й порівняння з LayerNorm на сталому та зсунутому векторах.
 #
 # Джерела для поглиблення:
 # [Identity Mappings in Deep Residual Networks](https://arxiv.org/abs/1603.05027),

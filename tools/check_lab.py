@@ -76,6 +76,15 @@ def dropout(x, p, training, rng):
 def encoder_with_dropout(x, attention, ffn, norm1, norm2, p, training, rng):
     h = residual_add(x, dropout(attention(norm1(x)), p, training, rng))
     return residual_add(h, dropout(ffn(norm2(h)), p, training, rng))
+
+def rms_norm(x, gamma, eps=1e-5):
+    if not x or len(x) != len(gamma) or eps <= 0:
+        raise ValueError("Invalid shape or epsilon")
+    denominator = (sum(v * v for v in x) / len(x) + eps) ** 0.5
+    return [g * v / denominator for v, g in zip(x, gamma)]
+
+def rms_norm_tokens(tokens, gamma, eps=1e-5):
+    return [rms_norm(row, gamma, eps) for row in tokens]
 '''
 
 
