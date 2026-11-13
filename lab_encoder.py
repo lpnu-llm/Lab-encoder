@@ -24,6 +24,20 @@
 # нульовою гілкою тому не змінює функцію мережі. Це зручна параметризація
 # для оптимізації, а не гарантія кращого результату на будь-якій задачі.
 #
+# **ResNet: звідки знайома ця ідея.** У роботі Kaiming He, Xiangyu Zhang,
+# Shaoqing Ren і Jian Sun
+# [Deep Residual Learning for Image Recognition (2015)](https://arxiv.org/abs/1512.03385)
+# залишкові блоки допомогли навчати глибокі згорткові мережі для зображень.
+# Замість повного перетворення H(x) гілка вчить поправку F(x) до входу.
+# Автори досліджували, зокрема, ResNet зі 152 шарами на ImageNet.
+# У ResNet гілка містить згортки; у Transformer — attention або FFN.
+# Спільний принцип — додати результат гілки до shortcut-входу.
+# Наш вираз x + F(x) показує саме це додавання; у початковому ResNet
+# після нього також застосовували ReLU, що важливо для аналізу градієнтів.
+#
+# **Прочитайте оригінал:** розділ 3.2 та рисунок 2 пояснюють residual-блок.
+# Порівняйте його з нашою схемою нижче: де проходить shortcut і що містить F?
+#
 # ![Прямий та зворотний шляхи залишкового блока](figures/residual.svg)
 #
 # Реалізуйте `residual_add`: поелементне додавання двох векторів однакової
@@ -269,57 +283,7 @@ if __name__ == "__main__":
 # а не реалізовували solver чи нескінченно глибокий Transformer.
 
 # %% [markdown]
-# ## 6. Місток до Transformer encoder
-#
-# Encoder має дві залишкові гілки: self-attention змішує інформацію токенів,
-# а feed-forward (FFN) перетворює ознаки кожного токена окремо.
-# У варіанті **pre-norm**:
-# $$h=x+\operatorname{Attention}(\operatorname{LN}_1(x)),$$
-# $$y=h+\operatorname{FFN}(\operatorname{LN}_2(h)).$$
-# Shortcut обходить і підмережу, і LayerNorm. У початковому Transformer
-# використовували **post-norm**: $h=\operatorname{LN}(x+F(x))$.
-# Там похідна всього блока містить також Jacobian LayerNorm: чистий
-# identity-шлях через весь блок уже не зберігається. Активація після
-# додавання теж може перекрити градієнт, наприклад ReLU на від'ємному виході.
-# Масштаб $1/N$ із попереднього розділу не є правилом для кожного encoder.
-#
-# Реалізуйте каркас pre-norm для **одного вектора** через передані функції.
-# На наступній лабораторній замінимо їх справжніми підмережами для
-# послідовності. У цій вправі тестові функції лише перевіряють порядок
-# викликів; вони не реалізують attention чи LayerNorm.
-
-# %%
-def encoder_residuals(x, attention, ffn, norm1, norm2):
-    ...
-
-
-def test_encoder_residuals():
-    calls = []
-    def norm1(x):
-        calls.append(("norm1", x[:]))
-        return [v * 2 for v in x]
-    def attention(x):
-        calls.append(("attention", x[:]))
-        return [1.0, -1.0]
-    def norm2(x):
-        calls.append(("norm2", x[:]))
-        return [v * 3 for v in x]
-    def ffn(x):
-        calls.append(("ffn", x[:]))
-        return [v * 0.5 for v in x]
-    x = [1.0, 2.0]
-    assert encoder_residuals(x, attention, ffn, norm1, norm2) == [5.0, 2.5]
-    assert calls == [("norm1", [1.0, 2.0]), ("attention", [2.0, 4.0]),
-                     ("norm2", [2.0, 1.0]), ("ffn", [6.0, 3.0])]
-    assert x == [1.0, 2.0]
-
-
-if __name__ == "__main__":
-    test_encoder_residuals()
-    print("✓ дві residual-гілки encoder")
-
-# %% [markdown]
-# ## 7. Додатково: той самий backward у PyTorch
+# ## 6. Додатково: той самий backward у PyTorch
 #
 # Після ручного виведення перевіримо, що autograd додає внески обох шляхів.
 # Встановіть `torch` у середовище ноутбука (`%pip install torch` в окремій
@@ -347,7 +311,7 @@ if __name__ == "__main__":
         print("✓ autograd збігається з ручним backward")
 
 # %% [markdown]
-# ## 8. Навіщо нормалізувати активації
+# ## 7. Навіщо нормалізувати активації
 #
 # Після лінійних шарів і residual-додавань масштаб активацій може змінюватися.
 # Великий масштаб, наприклад, може зробити attention-softmax дуже різким.
@@ -368,7 +332,7 @@ if __name__ == "__main__":
 # Головне питання: **які числа об'єднуємо в одну групу?**
 
 # %% [markdown]
-# ### 8.1. BatchNorm: одна ознака в різних прикладах
+# ### 7.1. BatchNorm: одна ознака в різних прикладах
 #
 # Для матриці `(batch, features)` BatchNorm обчислює статистики кожного
 # **стовпця**: порівнює ту саму ознаку між прикладами батчу.
@@ -424,7 +388,7 @@ if __name__ == "__main__":
 # статистики. Для Transformer зручно нормалізувати кожен токен окремо.
 
 # %% [markdown]
-# ## 9. LayerNorm: ознаки одного токена
+# ## 8. LayerNorm: ознаки одного токена
 #
 # Для `(batch, tokens, d_model)` обчислюємо середнє та дисперсію вздовж
 # **останньої осі**. Кожен токен отримує власні статистики:
@@ -501,7 +465,7 @@ if __name__ == "__main__":
 # А чи може padding вплинути на його attention без маски? Чому нормалізація
 # не замінює attention mask?
 #
-# ### 9.1. RMSNorm: керуємо масштабом без центрування
+# ### 8.1. RMSNorm: керуємо масштабом без центрування
 #
 # LayerNorm віднімає середнє та ділить на стандартне відхилення.
 # RMSNorm пропускає центрування й використовує середній квадрат:
@@ -584,10 +548,6 @@ if __name__ == "__main__":
     for x in [[1, 3], [7, 7], [-2, 2], [11, 13]]:
         print("x:", x, "LN:", layer_norm(x, [1, 1], [0, 0]),
               "RMS:", rms_norm(x, [1, 1]))
-    # Каркас розділу 6 приймає довільні norm-функції.
-    norm = lambda x: rms_norm(x, [1, 1])
-    zero = lambda x: [0.0, 0.0]
-    assert encoder_residuals([1.0, 3.0], zero, zero, norm, norm) == [1.0, 3.0]
     print("✓ RMSNorm і порівняння з LayerNorm")
 
 # %% [markdown]
@@ -609,6 +569,60 @@ if __name__ == "__main__":
 # Джерела: [RMSNorm, Zhang і Sennrich](https://arxiv.org/abs/1910.07467),
 # [PyTorch RMSNorm](https://docs.pytorch.org/docs/stable/generated/torch.nn.RMSNorm.html).
 
+
+# %% [markdown]
+# ## 9. Місток до Transformer encoder
+#
+# Encoder має дві залишкові гілки: self-attention змішує інформацію токенів,
+# а feed-forward (FFN) перетворює ознаки кожного токена окремо.
+# У варіанті **pre-norm**:
+# $$h=x+\operatorname{Attention}(\operatorname{LN}_1(x)),$$
+# $$y=h+\operatorname{FFN}(\operatorname{LN}_2(h)).$$
+# Shortcut обходить і підмережу, і LayerNorm. У початковому Transformer
+# використовували **post-norm**: $h=\operatorname{LN}(x+F(x))$.
+# Там похідна всього блока містить також Jacobian LayerNorm: чистий
+# identity-шлях через весь блок уже не зберігається. Активація після
+# додавання теж може перекрити градієнт, наприклад ReLU на від'ємному виході.
+# Масштаб $1/N$ із розділу 5 не є правилом для кожного encoder.
+#
+# Реалізуйте каркас pre-norm для **одного вектора** через передані функції.
+# На наступній лабораторній замінимо їх справжніми підмережами для
+# послідовності. У цій вправі тестові функції лише перевіряють порядок
+# викликів; вони не реалізують attention чи LayerNorm.
+
+# %%
+def encoder_residuals(x, attention, ffn, norm1, norm2):
+    ...
+
+
+def test_encoder_residuals():
+    calls = []
+    def norm1(x):
+        calls.append(("norm1", x[:]))
+        return [v * 2 for v in x]
+    def attention(x):
+        calls.append(("attention", x[:]))
+        return [1.0, -1.0]
+    def norm2(x):
+        calls.append(("norm2", x[:]))
+        return [v * 3 for v in x]
+    def ffn(x):
+        calls.append(("ffn", x[:]))
+        return [v * 0.5 for v in x]
+    x = [1.0, 2.0]
+    assert encoder_residuals(x, attention, ffn, norm1, norm2) == [5.0, 2.5]
+    assert calls == [("norm1", [1.0, 2.0]), ("attention", [2.0, 4.0]),
+                     ("norm2", [2.0, 1.0]), ("ffn", [6.0, 3.0])]
+    assert x == [1.0, 2.0]
+
+
+if __name__ == "__main__":
+    test_encoder_residuals()
+    print("✓ дві residual-гілки encoder")
+    # Каркас цього розділу приймає довільні norm-функції.
+    norm = lambda x: rms_norm(x, [1, 1])
+    zero = lambda x: [0.0, 0.0]
+    assert encoder_residuals([1.0, 3.0], zero, zero, norm, norm) == [1.0, 3.0]
 
 # %% [markdown]
 # ## 10. Dropout: випадкове вимкнення активацій

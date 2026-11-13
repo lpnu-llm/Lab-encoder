@@ -1,9 +1,9 @@
 # Лабораторна: завершальні шари — residual-зв'язки, нормалізація та Dropout
 
 Продовження `lab-attention` та `lab-positional-encoding`: пояснюємо залишковий
-зв'язок, реалізуємо forward і backward, досліджуємо вплив глибини на градієнти
-та готуємо каркас двох residual-гілок encoder. Далі порівнюємо BatchNorm
-з LayerNorm, реалізуємо LayerNorm, RMSNorm і Dropout та додаємо їх у каркас блока.
+зв'язок, реалізуємо forward і backward, досліджуємо вплив глибини на градієнти.
+Далі порівнюємо BatchNorm з LayerNorm, реалізуємо LayerNorm і RMSNorm,
+готуємо каркас двох residual-гілок encoder та додаємо Dropout.
 
 Відкрийте [lab_encoder.ipynb](lab_encoder.ipynb) у Jupyter або VS Code.
 Заповнюйте `...` та виконуйте комірки по черзі. Альтернатива — редагувати
@@ -21,11 +21,11 @@
 3. Backpropagation через мережу та чисельна перевірка похідних.
 4. Зникнення і вибух градієнтів при 1–1000 шарах, включно з residual.
 5. Границя нескінченної глибини через крок `T/N` і метод Ейлера.
-6. Дві residual-гілки pre-norm encoder та відмінність від post-norm.
-7. Необов'язкова перевірка ручних градієнтів у PyTorch.
-8. Нормалізація активацій; BatchNorm і залежність від складу батчу.
-9. LayerNorm: статистики одного токена, epsilon та навчувані gamma/beta.
+6. Необов'язкова перевірка ручних градієнтів у PyTorch.
+7. Нормалізація активацій; BatchNorm і залежність від складу батчу.
+8. LayerNorm: статистики одного токена, epsilon та навчувані gamma/beta.
    RMSNorm: середній квадрат без центрування; порівняння результатів і приклад Gemma 3.
+9. Дві residual-гілки pre-norm encoder та відмінність від post-norm.
 10. Inverted Dropout: випадкові маски, масштабування, training/evaluation і backward.
 11. Поєднання LayerNorm, Dropout та residual-гілок у pre-norm encoder.
 
