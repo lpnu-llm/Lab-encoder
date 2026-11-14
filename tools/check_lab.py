@@ -43,14 +43,6 @@ def depth_gradient(depth, w, residual, alpha=1.0):
         gradient, _ = block_backward(0.0, w, gradient, residual, alpha)
     return gradient
 
-def euler_limit(x0, a, total_time, depth):
-    step = total_time / depth
-    x, gradient = x0, 1.0
-    for _ in range(depth):
-        x = scalar_block(x, a, True, step)
-        gradient, _ = block_backward(0.0, a, gradient, True, step)
-    return x, gradient
-
 def encoder_residuals(x, attention, ffn, norm1, norm2):
     h = residual_add(x, attention(norm1(x)))
     return residual_add(h, ffn(norm2(h)))

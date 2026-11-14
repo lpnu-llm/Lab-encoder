@@ -45,7 +45,7 @@
 # Це додавання, а не конкатенація: кількість ознак залишається сталою.
 
 # %%
-from math import exp, isclose
+from math import isclose
 
 
 def residual_add(x, branch, alpha=1.0):
@@ -246,6 +246,10 @@ if __name__ == "__main__":
 # блока k; останнє значення відповідає виходу всієї мережі.
 # Кожен блок має власні вагу й bias, тут вони лише ініціалізовані однаково.
 # Це експеримент до навчання, без оновлення параметрів.
+# Після запуску комірки з’являться три графіки: активації у forward,
+# градієнт на кожному кроці backward та градієнт входу залежно від глибини.
+# Кольори порівнюють мережі з shortcut і без нього. Логарифмічна шкала
+# дозволяє побачити навіть дуже малі значення; це модулі величин.
 
 # %%
 def relu_depth_experiment(x0, weights, biases, residual):
@@ -300,6 +304,84 @@ if __name__ == "__main__":
         minus, _ = relu_depth_experiment(1.0 - eps, weights, biases, residual)
         assert isclose(gradients[0], (plus[-1] - minus[-1]) / (2 * eps), abs_tol=1e-8)
 
+
+def plot_relu_experiment(weight=0.01, bias=0.0, depth=10, max_depth=100):
+    """SVG із фактичних forward/backward-результатів; без plotting-залежностей."""
+    from html import escape
+    from math import ceil, floor, log10
+    if depth < 1 or max_depth < 1:
+        raise ValueError("Глибини мають бути додатними")
+    colors = ["#2563eb", "#dc2626"]
+    names = ["Без skip connection", "Зі skip connection"]
+    states, gradients, depth_gradients = [], [], []
+    depths = list(range(1, max_depth + 1))
+    for residual in [False, True]:
+        values, grads = relu_depth_experiment(1.0, [weight] * depth, [bias] * depth, residual)
+        states.append(values)
+        # Порядок backward: вихід, попередній шар, ..., вхід.
+        gradients.append(list(reversed(grads)))
+        depth_gradients.append([
+            relu_depth_experiment(1.0, [weight] * n, [bias] * n, residual)[1][0]
+            for n in depths
+        ])
+    panels = [
+        (list(range(depth + 1)), states, "Forward: активації", "Номер шару (0 = вхід)", "|активація|"),
+        (list(range(depth + 1)), gradients, "Backward: градієнт у кожному шарі", "Крок назад (0 = вихід)", "|градієнт|"),
+        (depths, depth_gradients, "Глибина мережі та градієнт входу", "Кількість блоків", "|градієнт входу|"),
+    ]
+    parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 1200 455" role="img" aria-label="Порівняння активацій та градієнтів із skip connection і без нього">',
+             '<rect width="1200" height="455" fill="white"/>',
+             '<g font-family="Arial, sans-serif" fill="#172033">']
+    def text(x, y, label, size=12, color="#172033"):
+        return f'<text x="{x}" y="{y}" font-size="{size}" fill="{color}">{escape(label)}</text>'
+    parts.append(text(24, 27, f"linear → ReLU: w={weight}, b={bias}; порівняння однакових початкових параметрів", 17))
+    for index, (xs, series, title, xlabel, ylabel) in enumerate(panels):
+        left, top, width, height = 76 + index * 400, 100, 300, 235
+        logs = [[log10(max(abs(v), 1e-300)) for v in row] for row in series]
+        low = floor(min(min(row) for row in logs))
+        high = ceil(max(max(row) for row in logs))
+        if high == low:
+            high += 1
+            low -= 1
+        def px(x):
+            return left + (x - xs[0]) / max(1, xs[-1] - xs[0]) * width
+        def py(value):
+            return top + height - (value - low) / (high - low) * height
+        parts.append(text(left - 45, 63, title, 13))
+        parts.append(text(left, 85, ylabel + " (log-шкала)", 12))
+        for tick in range(5):
+            value = low + (high - low) * tick / 4
+            y = py(value)
+            parts.append(f'<line x1="{left}" y1="{y}" x2="{left+width}" y2="{y}" stroke="#e2e8f0"/>')
+            parts.append(text(left - 65, y + 4, f"10^{value:.2g}"))
+            x = xs[0] + (xs[-1] - xs[0]) * tick / 4
+            parts.append(text(px(x) - 8, top + height + 20, f"{x:g}"))
+        for values, color in zip(logs, colors):
+            points = " ".join(f"{px(x):.2f},{py(y):.2f}" for x, y in zip(xs, values))
+            parts.append(f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="2.5"/>')
+        parts.append(text(left, 380, xlabel, 13))
+    for i, (name, color) in enumerate(zip(names, colors)):
+        x = 270 + i * 350
+        parts.append(f'<line x1="{x}" y1="412" x2="{x+30}" y2="412" stroke="{color}" stroke-width="3"/>')
+        parts.append(text(x + 40, 417, name, 15))
+    parts.append(text(24, 446, "Нулі показано на рівні 10^-300: логарифм нуля не визначений. Таблиці вище зберігають точні нулі.", 12))
+    parts.append('</g></svg>')
+    return "".join(parts)
+
+
+if __name__ == "__main__":
+    # Змініть параметри тут і виконайте цю комірку ще раз.
+    relu_plot = plot_relu_experiment(weight=0.01, bias=0.0, depth=10, max_depth=100)
+    try:
+        from IPython.display import SVG, display
+        get_ipython  # визначено у Jupyter / VS Code notebook
+    except (ImportError, NameError):
+        from pathlib import Path
+        Path("relu_gradients.svg").write_text(relu_plot, encoding="utf-8")
+        print("Графіки збережено у relu_gradients.svg")
+    else:
+        display(SVG(data=relu_plot))
+
 # %% [markdown]
 # При 100 блоках активна звичайна гілка дає градієнт входу приблизно
 # $10^{-200}$, а residual — приблизно 2.70. Якщо ReLU неактивна в усіх
@@ -314,69 +396,68 @@ if __name__ == "__main__":
 # похідна може дорівнювати -1 й скасувати внесок shortcut.
 
 # %% [markdown]
-# ## 5. Що означає «нескінченна глибина»
+# ## Необов'язково: від ResNet до Neural ODE
 #
-# Нескінченний Python-цикл не завершиться. Натомість розглянемо сімейство
-# мереж зі зростанням $N$, але **фіксованим загальним часом** $T$:
-# $$x_{k+1}=x_k+\frac{T}{N}a x_k.$$
-# Це метод Ейлера для $dx/dt=ax$ на $[0,T]$. У всіх блоків тут спільний
-# коефіцієнт $a$: ми уточнюємо дискретизацію однієї динаміки, а не доводимо
-# збіжність довільної мережі з незалежними параметрами.
+# Цей відступ можна пропустити: наступні вправи від нього не залежать.
+# У ResNet кожен блок додає поправку: **новий стан = старий стан + поправка**.
+# Уявіть маршрут: можна пройти його кількома великими кроками або багатьма
+# маленькими. Додаючи блоки, зменшуватимемо розмір кожної поправки, щоб
+# порівнювати проходження одного й того самого маршруту.
 #
-# $$x_N=x_0(1+aT/N)^N\longrightarrow x_0e^{aT},\qquad
-# \frac{\partial x_N}{\partial x_0}\longrightarrow e^{aT}.$$
-# При $a=1,T=1$ масштаб $1/N$ дає границю $e$, тоді як без нього
-# множник був би $2^N$. Для загальної гладкої гілки $F(x,t)$ аналогічний
-# перехід веде до ODE; збіжність вимагає умов регулярності та стійкого кроку.
-# Навіть $e^{aT}$ може бути дуже великим чи малим: scaling не усуває всі
-# проблеми backpropagation. Для $a<0$ грубий крок Ейлера теж може бути нестійким.
+# Наприклад, гілка повертає поточне число x. Зробимо N блоків і в кожному
+# додаватимемо лише x/N:
 #
-# Реалізуйте `euler_limit` циклом; одночасно накопичуйте похідну за входом.
-# Не використовуйте готову формулу чи `exp` у реалізації.
+# ```python
+# for _ in range(N):
+#     x = x + x / N
+# ```
+#
+# При N=1 це один великий стрибок. При N=100 — сто маленьких змін.
+# Зі зростанням N результат наближається до певного числа, а послідовність
+# дрібних змін можна уявляти як неперервний рух.
+#
+# **Саме тут з'являється Neural ODE:** замість списку residual-блоків
+# навчувана мережа задає, як швидко змінюється стан у поточній точці.
+# Чисельний розв'язувач багато разів викликає цю мережу й обчислює кінцевий
+# стан. Маленькі residual-оновлення схожі на найпростіші кроки такого
+# розв'язувача — їх називають кроками Ейлера. Для розуміння зв'язку
+# не потрібно виводити диференціальні рівняння.
+#
+# Це інший погляд на побудову мережі, а не твердження, що будь-який ResNet
+# автоматично стає Neural ODE, якщо додати багато шарів. Тут ми спеціально
+# зменшуємо поправки та повторюємо ту саму функцію. Реальний розв'язувач
+# теж виконує скінченну кількість обчислень, із витратами часу й похибкою.
+#
+# Готовий приклад нижче дозволяє побачити наближення без нової вправи.
+# Разом зі станом рахуємо градієнт входу: кожний блок множить його
+# на `1 + 1/N`. Без зменшення поправки множник був би 2 в кожному блоці.
 
 # %%
-def euler_limit(x0, a, total_time, depth):
-    """(Кінцевий стан, похідна за x0); depth — додатне ціле число."""
-    ...
-
-
-def test_euler_limit():
-    assert euler_limit(2.0, 0.0, 1.0, 10) == (2.0, 1.0)
-    assert euler_limit(2.0, 1.0, 0.0, 10) == (2.0, 1.0)
-    errors = []
-    for n in [10, 100, 1000, 10000]:
-        state, grad = euler_limit(2.0, 1.0, 1.0, n)
-        assert isclose(state, 2.0 * grad, rel_tol=1e-12)
-        assert isclose(grad, (1.0 + 1.0 / n) ** n, rel_tol=1e-11)
-        errors.append(abs(grad - exp(1)))
-    assert all(new < old for old, new in zip(errors, errors[1:]))
-    assert errors[-1] < 0.0002
-    _, grad = euler_limit(1.0, -1.0, 1.0, 10000)
-    assert isclose(grad, exp(-1), abs_tol=0.00002)
+def small_residual_steps(x0, depth):
+    x, gradient = x0, 1.0
+    for _ in range(depth):
+        x = x + x / depth
+        gradient *= 1 + 1 / depth
+    return x, gradient
 
 
 if __name__ == "__main__":
-    test_euler_limit()
-    print(" N       x_N          dx_N/dx_0     похибка градієнта")
-    for n in [1, 10, 100, 1000, 10000]:
-        state, grad = euler_limit(2.0, 1.0, 1.0, n)
-        print(f"{n:5d}   {state:.8f}   {grad:.8f}   {abs(grad-exp(1)):.3e}")
+    print("Кількість маленьких кроків | кінцевий стан | градієнт входу")
+    for n in [1, 10, 100, 1000]:
+        state, gradient = small_residual_steps(1.0, n)
+        print(f"{n:25d} | {state:13.6f} | {gradient:.6f}")
 
 # %% [markdown]
-# **Як це змінює backprop?** У дискретній мережі множимо $N$ факторів
-# $1+aT/N$. У неперервній границі чутливість $s(t)=\partial x(t)/\partial x_0$
-# задовольняє $ds/dt=a s$, $s(0)=1$. Градієнт loss, який поширюється від
-# кінця до початку, задовольняє $dg/dt=-a g$ з кінцевою умовою $g(T)$;
-# звідси $g(0)=e^{aT}g(T)$.
+# Обидва числа в цьому прикладі наближаються до 2.71828… (число e).
+# Без масштабу 1/N стан і градієнт подвоювалися б на кожному кроці.
+# В інших задачах навіть маленькі оновлення можуть давати великі чи малі
+# градієнти: Neural ODE не гарантує усунення проблем навчання.
 #
-# Пам'ять і час не стають безкоштовними: звичайний backprop зі збереженням
-# активацій має витрати, що зростають із глибиною. Checkpointing обмінює
-# пам'ять на повторні обчислення; ODE-solvers використовують скінченне число
-# кроків із чисельною похибкою. Тут ми досліджували точну просту границю,
-# а не реалізовували solver чи нескінченно глибокий Transformer.
+# Для зацікавлених: [Neural Ordinary Differential Equations,
+# Chen та ін., 2018](https://arxiv.org/abs/1806.07366).
 
 # %% [markdown]
-# ## 6. Додатково: той самий backward у PyTorch
+# ## Необов’язково: перевірка backward у PyTorch
 #
 # Після ручного виведення перевіримо, що autograd додає внески обох шляхів.
 # Встановіть `torch` у середовище ноутбука (`%pip install torch` в окремій
@@ -404,7 +485,7 @@ if __name__ == "__main__":
         print("✓ autograd збігається з ручним backward")
 
 # %% [markdown]
-# ## 7. Навіщо нормалізувати активації
+# ## 5. Навіщо нормалізувати активації
 #
 # Після лінійних шарів і residual-додавань масштаб активацій може змінюватися.
 # Великий масштаб, наприклад, може зробити attention-softmax дуже різким.
@@ -425,7 +506,7 @@ if __name__ == "__main__":
 # Головне питання: **які числа об'єднуємо в одну групу?**
 
 # %% [markdown]
-# ### 7.1. BatchNorm: одна ознака в різних прикладах
+# ### 5.1. BatchNorm: одна ознака в різних прикладах
 #
 # Для матриці `(batch, features)` BatchNorm обчислює статистики кожного
 # **стовпця**: порівнює ту саму ознаку між прикладами батчу.
@@ -481,7 +562,7 @@ if __name__ == "__main__":
 # статистики. Для Transformer зручно нормалізувати кожен токен окремо.
 
 # %% [markdown]
-# ## 8. LayerNorm: ознаки одного токена
+# ## 6. LayerNorm: ознаки одного токена
 #
 # Для `(batch, tokens, d_model)` обчислюємо середнє та дисперсію вздовж
 # **останньої осі**. Кожен токен отримує власні статистики:
@@ -568,7 +649,7 @@ if __name__ == "__main__":
 # А чи може padding вплинути на його attention без маски? Чому нормалізація
 # не замінює attention mask?
 #
-# ### 8.1. RMSNorm: керуємо масштабом без центрування
+# ### 6.1. RMSNorm: керуємо масштабом без центрування
 #
 # LayerNorm віднімає середнє та ділить на стандартне відхилення.
 # RMSNorm пропускає центрування й використовує середній квадрат:
@@ -674,7 +755,7 @@ if __name__ == "__main__":
 
 
 # %% [markdown]
-# ## 9. Місток до Transformer encoder
+# ## 7. Місток до Transformer encoder
 #
 # Encoder має дві залишкові гілки: self-attention змішує інформацію токенів,
 # а feed-forward (FFN) перетворює ознаки кожного токена окремо.
@@ -686,7 +767,6 @@ if __name__ == "__main__":
 # Там сигнал похибки має пройти ще й через LayerNorm після додавання:
 # обхідний шлях уже не проходить через весь блок без змін. Активація після
 # додавання теж може перекрити градієнт, наприклад ReLU на від'ємному виході.
-# Масштаб $1/N$ із розділу 5 не є правилом для кожного encoder.
 #
 # Реалізуйте каркас pre-norm для **одного вектора** через передані функції.
 # На наступній лабораторній замінимо їх справжніми підмережами для
@@ -728,7 +808,7 @@ if __name__ == "__main__":
     assert encoder_residuals([1.0, 3.0], zero, zero, norm, norm) == [1.0, 3.0]
 
 # %% [markdown]
-# ## 10. Dropout: випадкове вимкнення активацій
+# ## 8. Dropout: випадкове вимкнення активацій
 #
 # Мережа може добре запам'ятати навчальні приклади, але помилятися на нових
 # (overfitting). Dropout під час навчання додає шум: випадково обнуляє
@@ -812,7 +892,7 @@ if __name__ == "__main__":
 # розкид із `p=.1` та `.9`. Не перевстановлюйте seed усередині циклу.
 
 # %% [markdown]
-# ## 11. LayerNorm і Dropout у залишкових гілках encoder
+# ## 9. LayerNorm і Dropout у залишкових гілках encoder
 #
 # Тепер попередній каркас отримує конкретний LayerNorm і Dropout:
 # $$h=x+\mathrm{Dropout}(\mathrm{Attention}(\mathrm{LN}_1(x))),$$
@@ -886,7 +966,7 @@ if __name__ == "__main__":
 # 1. Реалізації функцій і перевірки, що проходять.
 # 2. Таблицю градієнтів за глибиною та пояснення зникнення / вибуху через
 #    добуток похідних. Окремо поясніть випадок $F'(x)=-1$.
-# 3. Таблицю наближення до $e$ та пояснення, чому потрібен масштаб $T/N$.
+# 3. Результати ReLU-експерименту: градієнти з shortcut і без нього.
 # 4. Формулу backward для residual-блока і схему двох гілок encoder.
 # 5. Порівняння осей BatchNorm та LayerNorm на одній матриці; пояснення
 #    training/evaluation, ролі epsilon та параметрів gamma/beta.
