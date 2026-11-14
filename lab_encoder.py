@@ -230,6 +230,90 @@ if __name__ == "__main__":
 # блока ще не означає стабільний добуток для довільної глибини?
 
 # %% [markdown]
+# ### 4.1. Маленька нейромережа: linear → ReLU
+#
+# Тепер замість лише множення використаємо знайомі лінійний шар та ReLU.
+# Для простоти кожен шар має один нейрон:
+# $$F(x)=\operatorname{ReLU}(wx+b).$$
+# Порівняємо звичайний блок $y=F(x)$ із залишковим $y=x+F(x)$.
+# ReLU стоїть **усередині гілки**, тому не перекриває shortcut після суми.
+# Для додатного $wx+b$ похідна гілки дорівнює $w$, для від'ємного — 0.
+# У точці зламу 0 у цьому коді обираємо похідну 0, як у PyTorch.
+#
+# Готовий код зберігає активації та проходить шари назад. Починаємо backward
+# із сигналу 1: вимірюємо чутливість виходу мережі до кожної активації,
+# окремо від вибору loss. `gradients[k]` — градієнт, що дійшов до входу
+# блока k; останнє значення відповідає виходу всієї мережі.
+# Кожен блок має власні вагу й bias, тут вони лише ініціалізовані однаково.
+# Це експеримент до навчання, без оновлення параметрів.
+
+# %%
+def relu_depth_experiment(x0, weights, biases, residual):
+    """Повертає всі активації та градієнти виходу за ними."""
+    if len(weights) != len(biases):
+        raise ValueError("Кожному шару потрібні вага та bias")
+    activations, branch_derivatives = [x0], []
+    for w, b in zip(weights, biases):
+        x = activations[-1]
+        z = w * x + b
+        branch = max(0.0, z)
+        activations.append(x + branch if residual else branch)
+        branch_derivatives.append(w if z > 0 else 0.0)
+    gradients = [0.0] * len(activations)
+    gradients[-1] = 1.0
+    for k in reversed(range(len(weights))):
+        local = branch_derivatives[k] + (1.0 if residual else 0.0)
+        gradients[k] = gradients[k + 1] * local
+    return activations, gradients
+
+
+if __name__ == "__main__":
+    print("Глибина | градієнт входу: plain | градієнт входу: residual")
+    for depth in [1, 5, 10, 50, 100]:
+        # Маленька похідна активної гілки: .01 проти 1.01 з shortcut.
+        weights, biases = [0.01] * depth, [0.0] * depth
+        _, plain = relu_depth_experiment(1.0, weights, biases, False)
+        _, skip = relu_depth_experiment(1.0, weights, biases, True)
+        print(f"{depth:7d} | {plain[0]:23.3e} | {skip[0]:.3e}")
+        assert isclose(plain[0], 0.01 ** depth, rel_tol=1e-12)
+        assert isclose(skip[0], 1.01 ** depth, rel_tol=1e-12)
+
+    print("\nBackward через 10 блоків (від виходу до входу):")
+    _, plain = relu_depth_experiment(1.0, [0.01] * 10, [0.0] * 10, False)
+    _, skip = relu_depth_experiment(1.0, [0.01] * 10, [0.0] * 10, True)
+    print("Активація | plain        | residual")
+    for k in reversed(range(11)):
+        print(f"x_{k:<8d} | {plain[k]:12.3e} | {skip[k]:.3e}")
+
+    # Неактивна ReLU: гілка не передає градієнт, shortcut передає.
+    _, plain = relu_depth_experiment(1.0, [0.01] * 10, [-2.0] * 10, False)
+    _, skip = relu_depth_experiment(1.0, [0.01] * 10, [-2.0] * 10, True)
+    assert plain[0] == 0.0 and skip[0] == 1.0
+    print("\nНеактивні ReLU: plain =", plain[0], "; residual =", skip[0])
+
+    # Перевірка ручного backward через малі зміни входу, далеко від зламів.
+    for residual in [False, True]:
+        weights, biases = [0.2, 0.3, 0.4], [0.1, 0.1, 0.1]
+        _, gradients = relu_depth_experiment(1.0, weights, biases, residual)
+        eps = 1e-6
+        plus, _ = relu_depth_experiment(1.0 + eps, weights, biases, residual)
+        minus, _ = relu_depth_experiment(1.0 - eps, weights, biases, residual)
+        assert isclose(gradients[0], (plus[-1] - minus[-1]) / (2 * eps), abs_tol=1e-8)
+
+# %% [markdown]
+# При 100 блоках активна звичайна гілка дає градієнт входу приблизно
+# $10^{-200}$, а residual — приблизно 2.70. Якщо ReLU неактивна в усіх
+# гілках, результати — 0 та 1. Це наочний випадок, коли shortcut допомагає.
+# Порівнюємо однакові початкові параметри; активації двох мереж різні,
+# тому в загальному випадку різними можуть стати й активні нейрони.
+#
+# **Дослідіть:** замініть вагу 0.01 на 0.5. Residual-градієнт тепер
+# зростає як $1.5^N$: shortcut може спричинити й вибух градієнтів.
+# Спробуйте також різні bias та поясніть, де ReLU перестає пропускати сигнал.
+# Не робіть висновку «градієнт ніколи не нульовий»: у загальній гілці
+# похідна може дорівнювати -1 й скасувати внесок shortcut.
+
+# %% [markdown]
 # ## 5. Що означає «нескінченна глибина»
 #
 # Нескінченний Python-цикл не завершиться. Натомість розглянемо сімейство
