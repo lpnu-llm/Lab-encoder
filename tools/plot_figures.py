@@ -32,7 +32,7 @@ def residual():
     body += label(815, 184, "y", 24)
     body += '<path d="M160 177 V85 H645 V150" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>'
     body += label(300, 75, "shortcut: identity")
-    body += label(90, 275, "Backward: gₓ = gᵧ + α Jꜰᵀ gᵧ", 23)
+    body += label(90, 275, "Для одного числа: gₓ = gᵧ · (1 + α F′(x))", 23)
     body += label(90, 315, "Два шляхи → сума внесків у градієнт входу.")
     body += label(90, 350, "Нульова гілка F(x) = 0 → вихід y = x.")
     return svg(body)
