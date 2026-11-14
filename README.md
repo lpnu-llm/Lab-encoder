@@ -21,7 +21,7 @@
 3. Backpropagation через мережу та чисельна перевірка похідних.
 4. Зникнення і вибух градієнтів при 1–1000 шарах, включно з residual.
 5. Нормалізація активацій; BatchNorm і залежність від складу батчу.
-6. LayerNorm: статистики одного токена, epsilon та навчувані gamma/beta.
+6. LayerNorm: поточні приховані стани, місце нормалізації, epsilon та gamma/beta.
    RMSNorm: середній квадрат без центрування; порівняння результатів і приклад Gemma 3.
 7. Дві residual-гілки pre-norm encoder та відмінність від post-norm.
 8. Inverted Dropout: випадкові маски, масштабування, training/evaluation і backward.
